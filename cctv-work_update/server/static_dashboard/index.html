@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>중앙 서버 대시보드</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <header class="topbar">
+        <!-- 왼쪽 영역 (기존 로고, 메뉴, API 상태) -->
+        <div class="topbar-left">
+            <div class="brand">
+                <h1>중앙 서버 모니터링 대시보드</h1>
+                <span class="subtitle">CCTV 기반 환경 적응형 오염 모니터링</span>
+            </div>
+            <nav class="nav">
+                <a href="#realtime" class="active">실시간 CCTV 상태</a>
+                <a href="#pollution">오염도 현황</a>
+                <a href="#butt-candidates">꽁초 후보</a>
+                <a href="#th">실시간 확산 경로</a>
+                <a href="#events">이벤트 기록</a>
+                <a href="#settings">설정</a>
+            </nav>
+            <div class="api-status" id="api-status">
+                <span class="dot" id="api-status-dot"></span>
+                <span id="api-status-text">API 연결 확인 중…</span>
+            </div>
+        </div>
+        
+        <!-- 오른쪽 영역 (날씨 위젯) -->
+        <div class="topbar-right">
+            <div id="weather-widget" class="weather-widget">
+                <div id="current-date" class="weather-date">로딩 중...</div>
+                <div class="weather-info">
+                    <span id="temperature">🌡️ -°C</span> 
+                    <span id="humidity">💧 -%</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="content">
+        <section id="realtime" class="panel">
+            <h2>실시간 CCTV 상태</h2>
+            <div class="cards">
+                <div class="card stat">
+                    <span class="label">연결된 장치</span>
+                    <span class="value" id="stat-online">3 / 5</span>
+                </div>
+                <div class="card stat">
+                    <span class="label">스트리밍 정상</span>
+                    <span class="value ok" id="stat-streaming">3</span>
+                </div>
+                <div class="card stat">
+                    <span class="label">오프라인</span>
+                    <span class="value warn" id="stat-offline">2</span>
+                </div>
+                <div class="card stat">
+                    <span class="label">서버 상태</span>
+                    <span class="value ok" id="stat-server">정상</span>
+                </div>
+            </div>
+
+            <h3>CCTV 목록</h3>
+            <table class="data-table" id="cctv-table">
+                <thead>
+                    <tr>
+                        <th>장치 ID</th>
+                        <th>위치</th>
+                        <th>상태</th>
+                        <th>FPS</th>
+                        <th>모델 버전</th>
+                        <th>최근 통신</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <section id="pollution" class="panel">
+            <h2>오염도 현황 <span class="badge unbacked">미연동</span></h2>
+            <p class="note">
+                ※ 오염도 점수는 현재 통신 규약(v0.1)에 정의되어 있지 않아 백엔드에서
+                제공되지 않습니다. 프로토콜 확장 후 연동 예정입니다.
+            </p>
+            <h3>장치별 오염도 점수</h3>
+            <table class="data-table" id="pollution-table">
+                <thead>
+                    <tr>
+                        <th>장치 ID</th>
+                        <th>위치</th>
+                        <th>최근 점수</th>
+                        <th>등급</th>
+                        <th>측정 시각</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <!-- 로컬 영상 AI 분석 섹션 -->
+        <section id="ai-analysis" class="panel">
+            <h2>🎥 로컬 영상 AI 분석 (YOLOv8)</h2>
+            <p class="help-text">
+                ※ 컴퓨터에 저장된 CCTV 녹화 영상(MP4, AVI)을 업로드하고 대시보드에서 직접 확인하며 분석합니다.
+            </p>
+            
+            <!-- 파일 업로드 UI -->
+            <div style="background: #f8fafd; padding: 20px; border: 2px dashed #c8d4e6; border-radius: 8px; text-align: center; margin-bottom: 15px;">
+                <input type="file" id="video-upload" accept="video/mp4,video/avi,video/webm" multiple style="display: none;" />
+                <button onclick="document.getElementById('video-upload').click()" style="padding: 10px 20px; background: #4ea1ff; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px;">
+                    📂 다중 영상 파일 선택
+                </button>
+                <p id="upload-status" style="margin-top: 10px; color: #6b7a90; font-size: 13px;">선택된 파일이 없습니다.</p>
+            </div>
+
+            <!-- 💡 새로 추가된 비디오 플레이어 영역 (기본적으로 숨겨짐) -->
+            <div id="video-preview-container" style="display: none; margin-bottom: 20px; background: #000; border-radius: 8px; overflow: hidden; text-align: center;">
+                <div id="video-filename" style="background: #1f2a3a; color: #4ea1ff; padding: 8px; font-size: 13px; font-weight: bold; text-align: left;">
+                    현재 재생 중: 파일명
+                </div>
+                <video id="video-player" controls muted style="max-width: 100%; max-height: 400px; display: block; margin: 0 auto;"></video>
+            </div>
+
+            <!-- 업로드된 영상 목록 -->
+            <table class="data-table" id="analysis-table">
+                <thead>
+                    <tr>
+                        <th>파일명</th>
+                        <th>상태</th>
+                        <th>분석 진행률</th>
+                        <th>화재/오염 감지 건수</th>
+                        <th>동작</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="5" class="muted">업로드된 영상이 없습니다.</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+                <section id="butt-candidates" class="panel">
+            <h2>지속 변화 후보 (꽁초 후보) <span class="badge warn" id="butt-count">0건</span></h2>
+            <p class="note">
+                ※ 고정 CCTV 영상에서 오래 정지한 변화를 자동으로 모은 <b>후보</b>입니다. 쓰레기·꽁초로 자동 분류한 결과가 아니며
+                사람 검수가 필요합니다. 실제 꽁초 검출 성능은 아직 검증되지 않았습니다.
+            </p>
+            <table class="data-table" id="butt-table">
+                <thead>
+                    <tr>
+                        <th>시각</th>
+                        <th>장치</th>
+                        <th>상세</th>
+                        <th>검수 패널</th>
+                        <th>검수</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td class="muted" colspan="5">수신된 지속 변화 후보가 없습니다.</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 변경 전: 온습도 정보 섹션을 지우고 아래 내용으로 교체합니다 -->
+<section id="th" class="card">
+    <div class="section-header">
+        <h2>🔥 실시간 발화점 추적 현황</h2>
+        <span class="badge ai-active">AI 분석 중</span>
+    </div>
+    <p class="help-text">
+        ※ YOLOv8 모델이 화재 객체를 처음 인식한 좌표(발화점)를 추적하여 표시합니다.
+    </p>
+    <div class="table-responsive">
+        <table id="fire-origin-table" class="data-table">
+            <thead>
+                <tr>
+                    <th>장치 ID</th>
+                    <th>발화 감지 시각</th>
+                    <th>실시간 확산 경로 (발화 원점 ➡️ 현재 위치)</th>
+                    <th>위험 등급</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- 데이터가 여기에 표시됩니다 -->
+            </tbody>
+        </table>
+    </div>
+</section>
+
+        <section id="events" class="panel">
+    <!-- 제목과 버튼들을 나란히 배치하는 구역 -->
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">이벤트 기록</h2>
+        <div>
+            <button id="btn-export" style="padding: 6px 12px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px; font-weight: bold;">💾 엑셀 저장</button>
+            <button id="btn-clear" style="padding: 6px 12px; cursor: pointer; background: #ff6b6b; color: white; border: none; border-radius: 4px; margin-left: 8px; font-weight: bold;">🧹 화면 지우기</button>
+        </div>
+    </div>
+    
+    <table class="data-table" id="events-table" style="margin-top: 15px;">
+        <thead>
+            <tr>
+                <th>시각</th>
+                <th>장치</th>
+                <th>유형</th>
+                <th>내용</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</section>
+
+        <section id="settings" class="panel">
+            <h2>설정</h2>
+            <div class="cards">
+                <div class="card info">
+                    <span class="label">서버 상태</span>
+                    <span class="value ok">정상</span>
+                </div>
+                <div class="card info">
+                    <span class="label">현재 모델 버전</span>
+                    <span class="value" id="setting-model-version">v0.1.0-dev</span>
+                </div>
+                <div class="card info">
+                    <span class="label">학습 파이프라인</span>
+                    <span class="value">대기 (placeholder)</span>
+                </div>
+                <div class="card info">
+                    <span class="label">규칙셋 배포</span>
+                    <span class="value">미배포 (placeholder)</span>
+                </div>
+            </div>
+            <p class="note">
+                ※ 실시간 CCTV 상태·이벤트 기록은 백엔드 API(<code id="setting-api-base">/</code>)에서
+                실시간으로 가져옵니다. 오염도·온습도는 아직 프로토콜에 정의되지 않아 미연동 상태입니다.
+            </p>
+        </section>
+    </main>
+
+    <footer class="bottombar">
+        <small>CCTV 기반 환경 적응형 통합 관제 시스템</small>
+    </footer>
+
+    <!-- API base URL. Override by editing this value (or set window.API_BASE
+         before script.js loads) for non-localhost deployments. -->
+    <script>
+        window.API_BASE = window.API_BASE || "http://localhost:8000";
+    </script>
+    <script src="butt_candidates.js"></script>
+    <script src="script.js"></script>
+    <script src="admin_bar.js"></script>
+</body>
+</html>
