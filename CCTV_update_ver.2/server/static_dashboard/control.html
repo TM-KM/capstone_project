@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>환경지기 통합 관제</title>
+<style>
+  :root{--bg:#0f1b2a;--bar:#162538;--line:#2a3d55;--ink:#e8eef6;--mute:#8fa3ba;--accent:#4ea1ff}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;overflow:hidden}
+  header{height:48px;display:flex;align-items:center;gap:14px;padding:0 14px;background:var(--bar);border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:16px;white-space:nowrap}
+  header small{color:var(--mute);white-space:nowrap}
+  .sp{flex:1}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;color:var(--ink);border:0;padding:6px 12px;font-size:12px;cursor:pointer}
+  .seg button.on{background:var(--accent);color:#06121f;font-weight:bold}
+  header a,header .lo{color:#cfe3ff;text-decoration:none;font-size:12px;cursor:pointer;background:none;border:0}
+  header .lo{background:#c0392b;color:#fff;border-radius:999px;padding:5px 11px;font-weight:bold}
+  #who{font-size:12px;color:#9fc3ff}
+  #hdr-info{display:flex;align-items:center;gap:14px;font-size:12px;color:#cfe3ff;white-space:nowrap}
+  #hdr-info .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#7f8c8d;margin-right:6px}
+  #hdr-info .ok .dot{background:#2ecc71}#hdr-info .bad .dot{background:#e74c3c}
+  @media (max-width:1100px){#h-wx,#h-clock{display:none}}
+  .wrap{height:calc(100% - 48px);display:flex}
+  .pane{position:relative;min-width:0;height:100%}
+  .pane iframe{width:100%;height:100%;border:0;display:block;background:#fff}
+  #left{flex:0 0 var(--lw,60%)}
+  #right{flex:1 1 0;background:#f3f6fa}
+  #dv{flex:0 0 8px;cursor:col-resize;background:var(--line);position:relative}
+  #dv::after{content:"";position:absolute;left:2px;top:50%;width:4px;height:42px;margin-top:-21px;border-radius:2px;background:#6c86a6}
+  body.drag iframe{pointer-events:none}
+  body.mapOnly #right,body.mapOnly #dv{display:none}body.mapOnly #left{flex:1 1 auto}
+  body.dashOnly #left,body.dashOnly #dv{display:none}
+  @media (max-width:900px){
+    .wrap{flex-direction:column}
+    #left{flex:0 0 50%}#right{flex:1 1 0}#dv{display:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡 환경지기 통합 관제</h1><small>지도 + 중앙 대시보드</small>
+  <span class="sp"></span>
+  <div id="hdr-info" title="서버 상태 · 현재 시각 · 안양시 만안구 날씨(Open-Meteo)">
+    <span id="h-srv"><i class="dot"></i><b>서버 확인 중</b></span>
+    <span id="h-clock">--:--</span>
+    <span id="h-wx">날씨 --</span>
+  </div>
+  <div class="seg" id="seg">
+    <button data-m="split" class="on">분할</button><button data-m="mapOnly">지도만</button><button data-m="dashOnly">대시보드만</button>
+  </div>
+  <span id="who"></span>
+  <a id="lo-link" style="display:none"></a>
+  <button class="lo" id="logout" style="display:none">로그아웃</button>
+</header>
+<div class="wrap">
+  <div class="pane" id="left"><iframe id="mapf" src="map.html" title="지도 관제"></iframe></div>
+  <div id="dv" title="끌어서 비율 조절"></div>
+  <div class="pane" id="right"><iframe id="dashf" src="index.html" title="중앙 대시보드"></iframe></div>
+</div>
+<script>
+  (function () {
+    var left = document.getElementById("left"), wrap = document.querySelector(".wrap");
+    function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+    function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+    var lw = parseFloat(load("control.lw"));
+    if (lw >= 40 && lw <= 68) left.style.setProperty("--lw", lw + "%");
+    var mode = load("control.mode"); if (["split", "mapOnly", "dashOnly"].indexOf(mode) < 0) mode = "split";
+    function setMode(m) {
+      document.body.classList.remove("mapOnly", "dashOnly"); if (m !== "split") document.body.classList.add(m);
+      document.querySelectorAll("#seg button").forEach(function (b) { b.classList.toggle("on", b.dataset.m === m); });
+      store("control.mode", m);
+    }
+    document.querySelectorAll("#seg button").forEach(function (b) { b.addEventListener("click", function () { setMode(b.dataset.m); }); });
+    setMode(mode);
+    // 가운데 줄을 끌어 지도:대시보드 비율을 조절 (끄는 동안 iframe 이 마우스를 가로채지 않게 막는다)
+    var dv = document.getElementById("dv"), dragging = false;
+    dv.addEventListener("mousedown", function (e) { dragging = true; document.body.classList.add("drag"); e.preventDefault(); });
+    window.addEventListener("mouseup", function () { if (dragging) { dragging = false; document.body.classList.remove("drag"); store("control.lw", parseFloat(getComputedStyle(left).getPropertyValue("--lw")) || ""); } });
+    window.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      var r = wrap.getBoundingClientRect(), pct = Math.min(68, Math.max(40, (e.clientX - r.left) / r.width * 100));
+      left.style.setProperty("--lw", pct + "%");
+    });
+    // 대시보드 칸: 같은 사이트라서 부모가 직접 손댈 수 있다. 위쪽 머리글(날씨·메뉴)은 숨기고 강조 표시 스타일을 넣는다.
+    var dash = document.getElementById("dashf");
+    function prepDash() {
+      try {
+        var d = dash.contentDocument; if (!d || !d.head || d.getElementById("ctl-embed-style")) return;
+        var st = d.createElement("style"); st.id = "ctl-embed-style";
+        st.textContent = ".topbar,.bottombar{display:none!important}.content{padding-top:12px!important}" +
+          ".litter-hl{outline:3px solid #f5a35c!important;outline-offset:-2px;background:rgba(245,163,92,.18)!important}" +
+          ".data-table th,.data-table td{white-space:nowrap}#pollution,#cctv-table-wrap,section.card{overflow-x:auto}" +
+          // 통합 화면에서는 오염도 현황을 맨 위로 올리고, 긴 안내 글은 두 줄만 보이게 접는다(눌러서 펼침)
+          "main.content{display:flex;flex-direction:column}main.content>#pollution{order:-2}main.content>#realtime{order:-1}" +
+          "#pollution .note{max-height:2.9em;overflow:hidden;cursor:pointer;position:relative}#pollution .note.open{max-height:none}" +
+          "#pollution .note:not(.open)::after{content:' ▼ 펼치기';position:absolute;right:0;bottom:0;background:#fff;padding-left:8px;color:#2f6f62;font-weight:bold}" +
+          ".pv-card.litter-hl{outline:3px solid #f5a35c!important;outline-offset:2px}" +
+          // 옆으로 밀려나가지 않게: 화면 전체는 가로 스크롤 없이, 후보 표는 줄바꿈해서 칸 안에 들어오게 한다
+          "html,body{overflow-x:hidden!important}main.content{min-width:0;max-width:100%}" +
+          "#butt-candidates{min-width:0;max-width:100%;overflow-x:auto}" +
+          "#butt-table{width:100%}#butt-table th,#butt-table td{white-space:normal!important;word-break:break-word}" +
+          "#butt-table td img{max-width:100%;height:auto}#butt-table select{max-width:100%}";
+        d.head.appendChild(st);
+        // 대시보드 표의 CCTV 줄을 누르면 지도가 그 CCTV 로 이동한다(표 줄에 마우스를 올리면 손가락 모양)
+        var st2 = d.createElement("style");
+        st2.textContent = "#pollution-table tbody tr,#cctv-table tbody tr{cursor:pointer}";
+        d.head.appendChild(st2);
+        d.addEventListener("click", function (e) {
+          var nt = e.target && e.target.closest ? e.target.closest("#pollution .note") : null;
+          if (nt) { nt.classList.toggle("open"); return; }
+          var tr = e.target && e.target.closest ? e.target.closest("#pollution-table tbody tr, #cctv-table tbody tr") : null;
+          if (!tr || !tr.cells || !tr.cells[0] || document.body.classList.contains("dashOnly")) return;
+          var id = tr.cells[0].textContent.trim();
+          try { document.getElementById("mapf").contentWindow.postMessage({ type: "litter-pan", id: id }, location.origin); } catch (_) { /* 무시 */ }
+        });
+      } catch (e) { /* 다른 사이트로 열렸다면 무시 */ }
+    }
+    // 머리글 오른쪽: 서버 상태 · 시각 · 날씨(관제 구역이 안양시 만안구라 위치를 고정해 쓴다)
+    (function headerInfo() {
+      var srv = document.getElementById("h-srv"), clk = document.getElementById("h-clock"), wx = document.getElementById("h-wx");
+      function tickClock() {
+        var n = new Date(), p = function (x) { return String(x).padStart(2, "0"); };
+        clk.textContent = (n.getMonth() + 1) + "/" + n.getDate() + " " + p(n.getHours()) + ":" + p(n.getMinutes());
+      }
+      function checkSrv() {
+        fetch("/api/devices", { credentials: "same-origin" }).then(function (r) {
+          srv.className = r.ok ? "ok" : "bad"; srv.lastChild.textContent = r.ok ? "서버 정상" : "서버 응답 이상(" + r.status + ")";
+        }).catch(function () { srv.className = "bad"; srv.lastChild.textContent = "서버 연결 끊김"; });
+      }
+      function icon(c) { return c === 0 ? "☀️" : c <= 3 ? "⛅" : c <= 48 ? "🌫️" : c <= 67 ? "🌧️" : c <= 77 ? "❄️" : c <= 82 ? "☔" : "⛈️"; }
+      function weather() {
+        fetch("https://api.open-meteo.com/v1/forecast?latitude=37.3868&longitude=126.9322&current=temperature_2m,relative_humidity_2m,weather_code")
+          .then(function (r) { return r.json(); })
+          .then(function (d) { var c = d.current; wx.textContent = "만안구 " + icon(c.weather_code) + " " + Math.round(c.temperature_2m) + "°C · 💧" + c.relative_humidity_2m + "%"; })
+          .catch(function () { wx.textContent = "날씨 불러오기 실패"; });
+      }
+      tickClock(); checkSrv(); weather();
+      setInterval(tickClock, 15000); setInterval(checkSrv, 10000); setInterval(weather, 600000);
+    })();
+    dash.addEventListener("load", prepDash);
+    // 지도 -> 대시보드: 지도에서 CCTV 를 고르면 옆 대시보드가 그 장치 줄로 이동하고 잠시 강조된다
+    window.addEventListener("message", function (ev) {
+      if (ev.origin !== location.origin || !ev.data || ev.data.type !== "litter-focus") return;
+      if (document.body.classList.contains("mapOnly")) return;
+      try {
+        var d = dash.contentDocument, id = String(ev.data.id || ""), first = null;
+        // 지도에서 CCTV 를 고르면 오른쪽에는 그 장치의 오염도(표 줄 + 점수 카드)를 보여 준다
+        d.querySelectorAll("#pollution-table tbody tr").forEach(function (tr) {
+          var c0 = tr.cells && tr.cells[0];
+          if (c0 && c0.textContent.trim() === id) { tr.classList.add("litter-hl"); first = first || tr; setTimeout(function () { tr.classList.remove("litter-hl"); }, 3500); }
+        });
+        var card = null;
+        d.querySelectorAll(".pv-card").forEach(function (cd) {
+          if (cd.getAttribute("data-dev") === id) { card = cd; cd.classList.add("litter-hl"); setTimeout(function () { cd.classList.remove("litter-hl"); }, 3500); }
+        });
+        var t = card || first || d.getElementById("pollution");
+        if (t && t.scrollIntoView) t.scrollIntoView({ behavior: "smooth", block: card ? "center" : "start" });
+      } catch (e) { /* 무시 */ }
+    });
+    // 지도에서 검수를 저장하면 오른쪽 오염도도 바로 다시 불러온다 (수동 새로고침 불필요)
+    window.addEventListener("message", function (ev) {
+      if (ev.origin !== location.origin || !ev.data || ev.data.type !== "litter-reviewed") return;
+      try { var w = dash.contentWindow; if (w && w.__buttRefresh) setTimeout(function () { w.__buttRefresh(); }, 300); } catch (e) { /* 무시 */ }
+    });
+    // 사용자 표시와 로그아웃
+    fetch("/api/auth/me", { credentials: "same-origin" }).then(function (r) {
+      if (r.status === 401) { location.href = "/login.html?next=/control.html"; return null; }
+      return r.ok ? r.json() : null;
+    }).then(function (i) {
+      if (!i) return;
+      document.getElementById("who").textContent = i.auth_enabled ? "👤 " + (i.user || "관리자") : "⚠ 로그인 보호 꺼짐";
+      if (i.auth_enabled) {
+        var b = document.getElementById("logout"); b.style.display = "";
+        b.addEventListener("click", function () { fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }).finally(function () { location.href = "/login.html"; }); });
+      }
+    }).catch(function () {});
+  })();
+</script>
+</body>
+</html>
